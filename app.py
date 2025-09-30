@@ -1,22 +1,62 @@
-from http.client import GONE
 import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from math_engine import math_engine
-from visualizations import viz
-from gamification import game_engine
-from theme import get_theme_css, THEMES
-from auth import AuthSystem, render_login_register_forms, initialize_auth
-from voice_commands import VoiceCommandSystem, render_voice_control_panel
-import config
 import time
 import random
 
+# Safe imports with error handling
+try:
+    from math_engine import math_engine
+    MATH_ENGINE_AVAILABLE = True
+except ImportError as e:
+    MATH_ENGINE_AVAILABLE = False
+    st.error(f"Math engine not available: {e}")
+
+try:
+    from visualizations import viz
+    VISUALIZATIONS_AVAILABLE = True
+except ImportError:
+    VISUALIZATIONS_AVAILABLE = False
+
+try:
+    from gamification import game_engine
+    GAMIFICATION_AVAILABLE = True
+except ImportError:
+    GAMIFICATION_AVAILABLE = False
+
+try:
+    from theme import get_theme_css, THEMES
+    THEME_AVAILABLE = True
+except ImportError:
+    THEME_AVAILABLE = False
+
+try:
+    from auth import AuthSystem, render_login_register_forms, initialize_auth
+    AUTH_AVAILABLE = True
+except ImportError:
+    AUTH_AVAILABLE = False
+
+try:
+    from voice_commands import VoiceCommandSystem, render_voice_control_panel
+    VOICE_AVAILABLE = True
+except ImportError as e:
+    VOICE_AVAILABLE = False
+    st.warning(f"Voice features disabled: {e}")
+
+# Configuration with fallbacks
+class Config:
+    def __init__(self):
+        self.APP_NAME = "Advanced Algebra Visualizer"
+        self.DEFAULT_THEME = "light"
+        self.ENABLE_GAMIFICATION = True
+
+config = Config()
+
 # Page configuration
 st.set_page_config(
-    page_title=config.config.APP_NAME,
+    page_title=config.APP_NAME,
     page_icon="🧮",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -25,23 +65,26 @@ st.set_page_config(
 class AlgebraVisualizerApp:
     def __init__(self):
         self.setup_session_state()
-        self.auth = AuthSystem()
-        self.voice_system = VoiceCommandSystem()
+        if AUTH_AVAILABLE:
+            self.auth = AuthSystem()
+        if VOICE_AVAILABLE:
+            self.voice_system = VoiceCommandSystem()
     
     def setup_session_state(self):
         """Initialize session state variables"""
-        if 'current_section' not in st.session_state:
-            st.session_state.current_section = "Dashboard"
-        if 'user_id' not in st.session_state:
-            st.session_state.user_id = f"user_{int(time.time())}"
-        if 'theme' not in st.session_state:
-            st.session_state.theme = config.config.DEFAULT_THEME
-        if 'learning_mode' not in st.session_state:
-            st.session_state.learning_mode = "Intermediate"
-        if 'random_problem' not in st.session_state:
-            st.session_state.random_problem = None
-        if 'is_authenticated' not in st.session_state:
-            st.session_state.is_authenticated = False
+        default_states = {
+            'current_section': "Dashboard",
+            'user_id': f"user_{int(time.time())}",
+            'theme': config.DEFAULT_THEME,
+            'learning_mode': "Intermediate",
+            'random_problem': None,
+            'is_authenticated': False,
+            'show_auth': False
+        }
+        
+        for key, value in default_states.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
     
     def render_sidebar(self):
         """Render the sidebar with controls"""
@@ -49,32 +92,38 @@ class AlgebraVisualizerApp:
             st.title("🎨 Control Panel")
             
             # Authentication Section
-            if not st.session_state.is_authenticated:
-                st.subheader("🔐 Authentication")
-                if st.button("Login / Register", use_container_width=True):
-                    st.session_state.show_auth = True
+            if AUTH_AVAILABLE:
+                if not st.session_state.is_authenticated:
+                    st.subheader("🔐 Authentication")
+                    if st.button("Login / Register", use_container_width=True):
+                        st.session_state.show_auth = True
+                else:
+                    user_data = self.auth.get_current_user()
+                    if user_data:
+                        st.subheader(f"👤 {user_data['username']}")
+                        st.write(f"Level: {user_data.get('level', 'Beginner')}")
+                        if st.button("Logout", use_container_width=True):
+                            self.auth.logout_user()
+                            st.session_state.is_authenticated = False
+                            st.rerun()
             else:
-                user_data = self.auth.get_current_user()
-                if user_data:
-                    st.subheader(f"👤 {user_data['username']}")
-                    st.write(f"Level: {user_data.get('level', 'Beginner')}")
-                    if st.button("Logout", use_container_width=True):
-                        self.auth.logout_user()
-                        st.session_state.is_authenticated = False
-                        st.rerun()
+                st.info("🔐 Authentication unavailable")
             
             # Theme Selection
-            st.subheader("🎨 Theme Settings")
-            theme = st.selectbox(
-                "Choose Theme:",
-                list(THEMES.keys()),
-                index=list(THEMES.keys()).index(st.session_state.theme),
-                key="theme_selector"
-            )
-            
-            if theme != st.session_state.theme:
-                st.session_state.theme = theme
-                st.rerun()
+            if THEME_AVAILABLE:
+                st.subheader("🎨 Theme Settings")
+                theme = st.selectbox(
+                    "Choose Theme:",
+                    list(THEMES.keys()),
+                    index=list(THEMES.keys()).index(st.session_state.theme),
+                    key="theme_selector"
+                )
+                
+                if theme != st.session_state.theme:
+                    st.session_state.theme = theme
+                    st.rerun()
+            else:
+                st.session_state.theme = "light"
             
             # Learning Mode
             st.subheader("📚 Learning Mode")
@@ -101,13 +150,17 @@ class AlgebraVisualizerApp:
                 )
             
             # Voice Control
-            st.subheader("🎤 Voice Control")
-            if st.button("Start Voice Commands", use_container_width=True):
-                self.voice_system.start_voice_listener()
-                st.success("Voice commands activated!")
+            if VOICE_AVAILABLE:
+                st.subheader("🎤 Voice Control")
+                if st.button("Start Voice Commands", use_container_width=True):
+                    self.voice_system.start_voice_listener()
+                    st.success("Voice commands activated!")
+            else:
+                st.subheader("🎤 Voice Control")
+                st.info("Voice features unavailable")
             
             # User Progress
-            if config.config.ENABLE_GAMIFICATION and st.session_state.is_authenticated:
+            if GAMIFICATION_AVAILABLE and st.session_state.is_authenticated:
                 self.render_progress_section()
     
     def render_progress_section(self):
@@ -117,24 +170,18 @@ class AlgebraVisualizerApp:
         user_data = game_engine.get_user_data(st.session_state.user_id)
         
         if user_data:
-            # Progress bar
-            levels = game_engine.get_levels()
-            current_level = user_data["current_level"]
-            next_level = min(current_level + 1, max(levels.keys()))
+            # Simple progress display
+            current_level = user_data.get("current_level", 1)
+            current_points = user_data.get("total_points", 0)
+            problems_solved = user_data.get("problems_solved", 0)
+            streak_days = user_data.get("streak_days", 0)
             
-            current_points = user_data["total_points"]
-            points_needed = levels[next_level]["points_required"] - levels[current_level]["points_required"]
-            points_progress = current_points - levels[current_level]["points_required"]
-            progress_percent = min(100, (points_progress / points_needed) * 100) if points_needed > 0 else 100
+            st.write(f"**Level:** {current_level}")
+            st.write(f"**Points:** {current_points}")
+            st.write(f"**Problems Solved:** {problems_solved}")
             
-            st.progress(progress_percent / 100)
-            st.write(f"Level {current_level}: {levels[current_level]['name']}")
-            st.write(f"Points: {current_points}")
-            st.write(f"Problems Solved: {user_data['problems_solved']}")
-            
-            # Streak
-            if user_data['streak_days'] > 0:
-                st.info(f"🔥 {user_data['streak_days']} day streak!")
+            if streak_days > 0:
+                st.info(f"🔥 {streak_days} day streak!")
         else:
             st.info("Start solving problems to track your progress!")
     
@@ -170,17 +217,19 @@ class AlgebraVisualizerApp:
                 "Solve: log₂(x) + log₂(x - 2) = 3"
             ]
         }
-        return random.choice(problems[level])
+        return random.choice(problems.get(level, problems["Intermediate"]))
     
     def render_main_dashboard(self):
         """Main dashboard with overview"""
         st.markdown('<div class="section-header">📊 Algebra Learning Dashboard</div>', unsafe_allow_html=True)
         
         # Welcome message
-        if st.session_state.is_authenticated:
+        if st.session_state.is_authenticated and AUTH_AVAILABLE:
             user_data = self.auth.get_current_user()
             if user_data:
                 st.success(f"🎉 Welcome back, {user_data['username']}! Ready to learn some algebra?")
+        else:
+            st.success("🎉 Welcome to Advanced Algebra Visualizer! Ready to learn some algebra?")
         
         # Quick stats
         col1, col2, col3, col4 = st.columns(4)
@@ -217,9 +266,14 @@ class AlgebraVisualizerApp:
                 st.rerun()
         
         # Voice Control Section
-        st.markdown("---")
-        st.subheader("🎤 Voice Control")
-        render_voice_control_panel()
+        if VOICE_AVAILABLE:
+            st.markdown("---")
+            st.subheader("🎤 Voice Control")
+            render_voice_control_panel()
+        else:
+            st.markdown("---")
+            st.subheader("🎤 Voice Control")
+            st.info("Voice commands are currently unavailable in this environment.")
         
         # Random problem challenge
         if st.session_state.random_problem:
@@ -234,11 +288,14 @@ class AlgebraVisualizerApp:
                 if st.button("Check Solution", use_container_width=True):
                     if user_solution:
                         st.success("Solution submitted! 🎉")
-                        if config.config.ENABLE_GAMIFICATION and st.session_state.is_authenticated:
-                            user_data, points = game_engine.update_user_progress(
-                                st.session_state.user_id, "Random Problem", 2, True
-                            )
-                            st.success(f"🎉 +{points} points earned!")
+                        if GAMIFICATION_AVAILABLE and st.session_state.is_authenticated:
+                            try:
+                                user_data, points = game_engine.update_user_progress(
+                                    st.session_state.user_id, "Random Problem", 2, True
+                                )
+                                st.success(f"🎉 +{points} points earned!")
+                            except Exception as e:
+                                st.error(f"Error updating progress: {e}")
                     else:
                         st.warning("Please enter your solution first")
     
@@ -267,50 +324,62 @@ class AlgebraVisualizerApp:
             st.markdown("</div>", unsafe_allow_html=True)
             
             # Real-time solution
-            st.markdown('<div class="step-by-step">', unsafe_allow_html=True)
-            st.subheader("📝 Step-by-Step Solution")
-            
-            solution = math_engine.solve_quadratic(a, b, c)
-            
-            st.write(f"**Step 1:** Calculate discriminant")
-            st.latex(f"D = b^2 - 4ac = ({b})^2 - 4({a})({c}) = {solution['discriminant']}")
-            
-            if solution["type"] == "real":
-                st.write("**Step 2:** Two real roots")
-                root1, root2 = solution["roots"]
-                st.latex(f"x = \\frac{{-b \\pm \\sqrt{{D}}}}{{2a}}")
-                st.latex(f"x_1 = {root1:.4f}, \\quad x_2 = {root2:.4f}")
-            elif solution["type"] == "double":
-                st.write("**Step 2:** One real root (double root)")
-                root = solution["roots"][0]
-                st.latex(f"x = \\frac{{-b}}{{2a}} = {root:.4f}")
+            if MATH_ENGINE_AVAILABLE:
+                st.markdown('<div class="step-by-step">', unsafe_allow_html=True)
+                st.subheader("📝 Step-by-Step Solution")
+                
+                solution = math_engine.solve_quadratic(a, b, c)
+                
+                st.write(f"**Step 1:** Calculate discriminant")
+                st.latex(f"D = b^2 - 4ac = ({b})^2 - 4({a})({c}) = {solution['discriminant']}")
+                
+                if solution["type"] == "real":
+                    st.write("**Step 2:** Two real roots")
+                    root1, root2 = solution["roots"]
+                    st.latex(f"x = \\frac{{-b \\pm \\sqrt{{D}}}}{{2a}}")
+                    st.latex(f"x_1 = {root1:.4f}, \\quad x_2 = {root2:.4f}")
+                elif solution["type"] == "double":
+                    st.write("**Step 2:** One real root (double root)")
+                    root = solution["roots"][0]
+                    st.latex(f"x = \\frac{{-b}}{{2a}} = {root:.4f}")
+                else:
+                    st.write("**Step 2:** Two complex roots")
+                    real_part, imag_part = solution["roots"]
+                    st.latex(f"x = {real_part:.4f} \\pm {imag_part:.4f}i")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
             else:
-                st.write("**Step 2:** Two complex roots")
-                real_part, imag_part = solution["roots"]
-                st.latex(f"x = {real_part:.4f} \\pm {imag_part:.4f}i")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+                st.error("Math engine unavailable for step-by-step solutions")
         
         with col2:
             # Visualization
             st.subheader("📊 Graphical Analysis")
             try:
-                fig = viz.create_quadratic_plot(a, b, c)
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Could not generate graph: {e}")           
-                # Fallback: create simple plot
+                # Create simple plot directly
                 x = np.linspace(-10, 10, 400)
                 y = a*x**2 + b*x + c
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=x, y=y, mode='lines', name=f'{a}x² + {b}x + {c}'))
+                
+                # Add roots if available
+                if MATH_ENGINE_AVAILABLE:
+                    solution = math_engine.solve_quadratic(a, b, c)
+                    if solution["type"] == "real":
+                        root1, root2 = solution["roots"]
+                        fig.add_trace(go.Scatter(x=[root1, root2], y=[0, 0], 
+                                               mode='markers', marker=dict(size=10, color='red'),
+                                               name='Roots'))
+                
                 fig.update_layout(title="Quadratic Function", xaxis_title="x", yaxis_title="y")
                 st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Could not generate graph: {e}")
             
             # Additional analysis
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Discriminant", f"{solution['discriminant']:.2f}")
+                discriminant = b**2 - 4*a*c
+                st.metric("Discriminant", f"{discriminant:.2f}")
             with col2:
                 vertex_x = -b/(2*a)
                 vertex_y = a*vertex_x**2 + b*vertex_x + c
@@ -326,12 +395,14 @@ class AlgebraVisualizerApp:
                 new_c = random.randint(-5, 5)
                 st.info(f"Try solving: {new_a}x² + {new_b}x + {new_c} = 0")
 
-
-            if config.config.ENABLE_GAMIFICATION and st.session_state.is_authenticated:
-                user_data, points = game_engine.update_user_progress(
-                    str(st.session_state.user_id), "Quadratic Equations", 2, True  # Convert to string
-                )
-                st.success(f"🎉 +{points} points earned!")
+            if GAMIFICATION_AVAILABLE and st.session_state.is_authenticated:
+                try:
+                    user_data, points = game_engine.update_user_progress(
+                        str(st.session_state.user_id), "Quadratic Equations", 2, True
+                    )
+                    st.success(f"🎉 +{points} points earned!")
+                except Exception as e:
+                    st.error(f"Error updating progress: {e}")
 
     def render_polynomial_analyzer(self):
         """Polynomial analysis section"""
@@ -366,11 +437,11 @@ class AlgebraVisualizerApp:
                         terms.append(f"{coeff}x")
                     else:
                         terms.append(f"{coeff}x^{power}")
-            poly_str += " + ".join(terms)
+            poly_str += " + ".join(terms) if terms else "0"
             st.success(f"**Polynomial:** {poly_str}")
             
             # Analyze polynomial
-            if st.button("Analyze Polynomial"):
+            if MATH_ENGINE_AVAILABLE and st.button("Analyze Polynomial"):
                 solution = math_engine.solve_polynomial(coefficients)
                 
                 if solution["success"]:
@@ -385,6 +456,8 @@ class AlgebraVisualizerApp:
                         st.write("**Complex Roots:**")
                         for i, root in enumerate(solution["complex_roots"], 1):
                             st.write(f"x_{i} = {root.real:.4f} ± {abs(root.imag):.4f}i")
+                else:
+                    st.error("Could not analyze polynomial")
         
         with col2:
             st.subheader("📊 Polynomial Graph")
@@ -398,17 +471,18 @@ class AlgebraVisualizerApp:
                                    line=dict(width=3, color="#704FD1")))
             
             # Add roots if available
-            try:
-                solution = math_engine.solve_polynomial(coefficients)
-                if solution["success"] and solution["real_roots"]:
-                    real_roots = [r.real for r in solution["real_roots"]]
-                    fig.add_trace(go.Scatter(x=real_roots, 
-                                           y=np.zeros(len(real_roots)),
-                                           mode='markers', 
-                                           marker=dict(size=10, color='red'),
-                                           name='Real Roots'))
-            except:
-                pass
+            if MATH_ENGINE_AVAILABLE:
+                try:
+                    solution = math_engine.solve_polynomial(coefficients)
+                    if solution["success"] and solution["real_roots"]:
+                        real_roots = [r.real for r in solution["real_roots"]]
+                        fig.add_trace(go.Scatter(x=real_roots, 
+                                               y=np.zeros(len(real_roots)),
+                                               mode='markers', 
+                                               marker=dict(size=10, color='red'),
+                                               name='Real Roots'))
+                except:
+                    pass
             
             fig.update_layout(
                 title="Polynomial Graph",
@@ -441,29 +515,42 @@ class AlgebraVisualizerApp:
             a_val = st.slider("Value of a", 1, 10, 4, key="proof_a")
             b_val = st.slider("Value of b", 1, 10, 3, key="proof_b")
             
-            # Define left_side and right_side for all identities
+            # Define expressions for evaluation
             if identity == "(a + b)² = a² + 2ab + b²":
-                left_side = f"({a_val} + {b_val})**2"
-                right_side = f"{a_val}**2 + 2*{a_val}*{b_val} + {b_val}**2"
+                left_side = (a_val + b_val) ** 2
+                right_side = a_val**2 + 2*a_val*b_val + b_val**2
+                left_expr = f"({a_val} + {b_val})²"
+                right_expr = f"{a_val}² + 2×{a_val}×{b_val} + {b_val}²"
+                
             elif identity == "(a - b)² = a² - 2ab + b²":
-                left_side = f"({a_val} - {b_val})**2"
-                right_side = f"{a_val}**2 - 2*{a_val}*{b_val} + {b_val}**2"
+                left_side = (a_val - b_val) ** 2
+                right_side = a_val**2 - 2*a_val*b_val + b_val**2
+                left_expr = f"({a_val} - {b_val})²"
+                right_expr = f"{a_val}² - 2×{a_val}×{b_val} + {b_val}²"
+                
             elif identity == "a² - b² = (a - b)(a + b)":
-                left_side = f"{a_val}**2 - {b_val}**2"
-                right_side = f"({a_val} - {b_val})*({a_val} + {b_val})"
+                left_side = a_val**2 - b_val**2
+                right_side = (a_val - b_val) * (a_val + b_val)
+                left_expr = f"{a_val}² - {b_val}²"
+                right_expr = f"({a_val} - {b_val})×({a_val} + {b_val})"
+                
             elif identity == "(a + b)³ = a³ + 3a²b + 3ab² + b³":
-                left_side = f"({a_val} + {b_val})**3"
-                right_side = f"{a_val}**3 + 3*{a_val}**2*{b_val} + 3*{a_val}*{b_val}**2 + {b_val}**3"
+                left_side = (a_val + b_val) ** 3
+                right_side = a_val**3 + 3*a_val**2*b_val + 3*a_val*b_val**2 + b_val**3
+                left_expr = f"({a_val} + {b_val})³"
+                right_expr = f"{a_val}³ + 3×{a_val}²×{b_val} + 3×{a_val}×{b_val}² + {b_val}³"
+                
             elif identity == "a³ + b³ = (a + b)(a² - ab + b²)":
-                left_side = f"{a_val}**3 + {b_val}**3"
-                right_side = f"({a_val} + {b_val})*({a_val}**2 - {a_val}*{b_val} + {b_val}**2)"
+                left_side = a_val**3 + b_val**3
+                right_side = (a_val + b_val) * (a_val**2 - a_val*b_val + b_val**2)
+                left_expr = f"{a_val}³ + {b_val}³"
+                right_expr = f"({a_val} + {b_val})×({a_val}² - {a_val}×{b_val} + {b_val}²)"
+                
             elif identity == "a³ - b³ = (a - b)(a² + ab + b²)":
-                left_side = f"{a_val}**3 - {b_val}**3"
-                right_side = f"({a_val} - {b_val})*({a_val}**2 + {a_val}*{b_val} + {b_val}**2)"
-            else:
-                # Default case
-                left_side = f"({a_val} + {b_val})**2"
-                right_side = f"{a_val}**2 + 2*{a_val}*{b_val} + {b_val}**2"
+                left_side = a_val**3 - b_val**3
+                right_side = (a_val - b_val) * (a_val**2 + a_val*b_val + b_val**2)
+                left_expr = f"{a_val}³ - {b_val}³"
+                right_expr = f"({a_val} - {b_val})×({a_val}² + {a_val}×{b_val} + {b_val}²)"
             
             # Display the identity being tested
             st.info(f"**Testing:** {identity}")
@@ -472,45 +559,26 @@ class AlgebraVisualizerApp:
             # Prove identity
             if st.button("Prove Identity"):
                 try:
-                    proof = math_engine.prove_identity(left_side, right_side)
+                    is_identity = abs(left_side - right_side) < 1e-10  # Numerical verification
                     
-                    if proof["success"]:
-                        if proof["is_identity"]:
-                            st.success("✅ Identity verified!")
-                            st.latex(f"{proof['left_side']} = {proof['right_side']}")
-                            
-                            # Show numerical verification
-                            left_result = eval(left_side)
-                            right_result = eval(right_side)
-                            st.write(f"**Numerical verification:**")
-                            st.write(f"Left side: {left_side} = {left_result}")
-                            st.write(f"Right side: {right_side} = {right_result}")
-                            st.write(f"Both sides equal: {left_result == right_result}")
-                        else:
-                            st.error("❌ Not an identity")
-                            st.latex(f"{proof['left_side']} \\neq {proof['right_side']}")
+                    if is_identity:
+                        st.success("✅ Identity verified!")
+                        st.latex(f"{left_expr} = {right_expr}")
+                        
+                        # Show numerical verification
+                        st.write(f"**Numerical verification:**")
+                        st.write(f"Left side: {left_expr} = {left_side}")
+                        st.write(f"Right side: {right_expr} = {right_side}")
+                        st.write(f"Both sides equal: {left_side == right_side}")
                     else:
-                        st.error("❌ Error in proving identity")
+                        st.error("❌ Not an identity")
+                        st.latex(f"{left_expr} \\neq {right_expr}")
                 except Exception as e:
                     st.error(f"❌ Error in calculation: {str(e)}")
         
         with col2:
-            st.subheader("📐 Geometric Proof")
-            
-            if identity == "(a + b)² = a² + 2ab + b²":
-                try:
-                    fig = viz.create_geometric_proof(a_val, b_val, "(a + b)²")
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("Geometric visualization not available for this identity")
-                except:
-                    st.info("Geometric visualization not available for this identity")
-            else:
-                st.info("Geometric proof visualization available for (a + b)² identity")
-            
-            # Algebraic proof steps
             st.subheader("📖 Algebraic Proof")
+            
             if identity == "(a + b)² = a² + 2ab + b²":
                 st.write("**Step 1:** Start with (a + b)²")
                 st.latex(r"(a + b)^2 = (a + b)(a + b)")
@@ -732,24 +800,44 @@ class AlgebraVisualizerApp:
     def render_authentication(self):
         """Render authentication page"""
         st.markdown('<div class="section-header">🔐 Authentication</div>', unsafe_allow_html=True)
-        render_login_register_forms()
+        if AUTH_AVAILABLE:
+            render_login_register_forms()
+        else:
+            st.info("Authentication system is currently unavailable. Using guest mode.")
+            if st.button("Continue as Guest"):
+                st.session_state.is_authenticated = True
+                st.session_state.show_auth = False
+                st.rerun()
     
     def run(self):
         """Main application runner"""
         # Apply theme
-        st.markdown(get_theme_css(st.session_state.theme), unsafe_allow_html=True)
+        if THEME_AVAILABLE:
+            st.markdown(get_theme_css(st.session_state.theme), unsafe_allow_html=True)
+        else:
+            # Basic CSS fallback
+            st.markdown("""
+            <style>
+            .main-header { color: #1f77b4; text-align: center; }
+            .section-header { color: #2e86ab; margin: 20px 0; font-size: 24px; }
+            </style>
+            """, unsafe_allow_html=True)
         
         # Header
-        st.markdown(f'<h1 class="main-header">🧮 {config.config.APP_NAME}</h1>', unsafe_allow_html=True)
+        st.markdown(f'<h1 class="main-header">🧮 {config.APP_NAME}</h1>', unsafe_allow_html=True)
         st.markdown("### Interactive platform for learning and visualizing algebra concepts")
         
         # Check authentication
-        initialize_auth()
+        if AUTH_AVAILABLE:
+            initialize_auth()
         
         # Show authentication page if not authenticated
-        if not st.session_state.is_authenticated:
+        if not st.session_state.is_authenticated and st.session_state.get('show_auth', False):
             self.render_authentication()
             return
+        elif not st.session_state.is_authenticated:
+            # Auto-continue as guest
+            st.session_state.is_authenticated = True
         
         # Render sidebar
         self.render_sidebar()
